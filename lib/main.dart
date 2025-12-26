@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
@@ -40,8 +41,9 @@ class AnaEkran extends StatefulWidget {
 class _AnaEkranState extends State<AnaEkran> {
   List<double> grafikVerisi = List.generate(50, (index) => 0.0);
   bool tehlikeVar = false;
-  String mevcutTahmin = "Bekleniyor...";
+  String mevcutTahmin = "Sistem Hazır";
   double mevcutConfidence = 0.0;
+  String userName = "Kullanıcı";
   
   late WebSocketChannel channel;
 
@@ -49,6 +51,21 @@ class _AnaEkranState extends State<AnaEkran> {
   void initState() {
     super.initState();
     baglantiyiKur();
+    profilBilgisiniGetir();
+  }
+
+  Future<void> profilBilgisiniGetir() async {
+    try {
+      final response = await http.get(Uri.parse('http://localhost:8000/profile'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          userName = data['fullName'] ?? "Kullanıcı";
+        });
+      }
+    } catch (e) {
+      debugPrint("Profil getirme hatası: $e");
+    }
   }
 
   void baglantiyiKur() {
@@ -86,13 +103,13 @@ class _AnaEkranState extends State<AnaEkran> {
   @override
   Widget build(BuildContext context) {
     Color aktifRenk = tehlikeVar ? const Color(0xFFFF5252) : const Color(0xFF00E676);
-    String durumMetni = tehlikeVar ? "DÜŞME ALGILANDI" : "GÜVENDE";
+    // String durumMetni = tehlikeVar ? "DÜŞME ALGILANDI" : "GÜVENDE"; // Removed, not used
     IconData durumIkonu = tehlikeVar ? Icons.warning_amber_rounded : Icons.verified_user_rounded;
 
     return Scaffold(
       // Üst tarafa navigasyon butonlarını ekledik
       appBar: AppBar(
-        title: Text("CSI TAKİP", style: GoogleFonts.rubik(letterSpacing: 2, color: Colors.grey)),
+        title: Text("HOŞ GELDİN, $userName", style: GoogleFonts.rubik(fontSize: 14, letterSpacing: 1.5, color: Colors.grey[500])),
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.history, size: 30),
@@ -104,9 +121,10 @@ class _AnaEkranState extends State<AnaEkran> {
         actions: [
           IconButton(
             icon: const Icon(Icons.person, size: 30),
-            onPressed: () {
+            onPressed: () async {
               // Profil sayfasına git
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfilSayfasi()));
+              await Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfilSayfasi()));
+              profilBilgisiniGetir(); // Geri dönünce ismi güncelle
             },
           )
         ],
@@ -150,7 +168,7 @@ class _AnaEkranState extends State<AnaEkran> {
               const SizedBox(height: 30),
 
               // GRAFİK
-              Text("CANLI SİNYAL", style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold)),
+              Text("CANLI SİNYAL (MAGNITUDE)", style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               SizedBox(
                 height: 100,
@@ -199,8 +217,70 @@ class _AnaEkranState extends State<AnaEkran> {
 }
 
 // --- 2. PROFİL SAYFASI ---
-class ProfilSayfasi extends StatelessWidget {
+class ProfilSayfasi extends StatefulWidget {
   const ProfilSayfasi({super.key});
+
+  @override
+  State<ProfilSayfasi> createState() => _ProfilSayfasiState();
+}
+
+class _ProfilSayfasiState extends State<ProfilSayfasi> {
+  final TextEditingController adController = TextEditingController();
+  final TextEditingController yasController = TextEditingController();
+  final TextEditingController telController = TextEditingController();
+  final TextEditingController kronikController = TextEditingController();
+  bool yukleniyor = false;
+
+  @override
+  void initState() {
+    super.initState();
+    mevcutBilgileriGetir();
+  }
+
+  Future<void> mevcutBilgileriGetir() async {
+    try {
+      final response = await http.get(Uri.parse('http://localhost:8000/profile'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          adController.text = data['fullName'] ?? "";
+          yasController.text = data['age'] ?? "";
+          telController.text = data['emergencyContact'] ?? "";
+          kronikController.text = data['chronicDiseases'] ?? "";
+        });
+      }
+    } catch (e) {
+      debugPrint("Profil getirme hatası: $e");
+    }
+  }
+
+  Future<void> profilKaydet() async {
+    setState(() => yukleniyor = true);
+    try {
+      final response = await http.post(
+        Uri.parse('http://localhost:8000/profile'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "username": "user123", // Hardcoded for now, can be dynamic later
+          "fullName": adController.text,
+          "age": yasController.text,
+          "emergencyContact": telController.text,
+          "chronicDiseases": kronikController.text,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Profil Walrus Üzerine Kaydedildi!")));
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Hata: $e")));
+    } finally {
+      if (mounted) setState(() => yukleniyor = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -217,26 +297,24 @@ class ProfilSayfasi extends StatelessWidget {
             ),
             const SizedBox(height: 30),
 
-            _buildInputAlani("Ad Soyad", "Ayşe Yılmaz"),
+            _buildInputAlani("Ad Soyad", "Ayşe Yılmaz", controller: adController),
             const SizedBox(height: 20),
-            _buildInputAlani("Yaş", "72"),
+            _buildInputAlani("Yaş", "72", controller: yasController, keyboardType: TextInputType.number),
             const SizedBox(height: 20),
-            _buildInputAlani("Acil Durum Numarası", "0555 123 45 67", icon: Icons.phone, renk: Colors.greenAccent),
+            _buildInputAlani("Acil Durum Numarası", "0555 123 45 67", icon: Icons.phone, renk: Colors.greenAccent, controller: telController, keyboardType: TextInputType.phone),
             const SizedBox(height: 20),
-            _buildInputAlani("Kronik Rahatsızlıklar", "Tansiyon, Şeker"),
+            _buildInputAlani("Kronik Rahatsızlıklar", "Tansiyon, Şeker", controller: kronikController),
 
             const SizedBox(height: 40),
             SizedBox(
               width: double.infinity,
               height: 60,
               child: ElevatedButton(
-                onPressed: () {
-                  // Geri dön (Kaydetmiş gibi yapıyoruz)
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Profil Güncellendi!")));
-                },
+                onPressed: yukleniyor ? null : profilKaydet,
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
-                child: Text("KAYDET", style: GoogleFonts.rubik(fontSize: 20, color: Colors.black, fontWeight: FontWeight.bold)),
+                child: yukleniyor 
+                  ? const CircularProgressIndicator(color: Colors.black)
+                  : Text("WALRUS'A KAYDET", style: GoogleFonts.rubik(fontSize: 20, color: Colors.black, fontWeight: FontWeight.bold)),
               ),
             )
           ],
@@ -246,8 +324,10 @@ class ProfilSayfasi extends StatelessWidget {
   }
 
   // Input kutusu tasarımcısı
-  Widget _buildInputAlani(String label, String placeholder, {IconData? icon, Color? renk}) {
+  Widget _buildInputAlani(String label, String placeholder, {IconData? icon, Color? renk, required TextEditingController controller, TextInputType? keyboardType}) {
     return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
       decoration: InputDecoration(
         labelText: label,
         hintText: placeholder,
@@ -264,52 +344,81 @@ class ProfilSayfasi extends StatelessWidget {
 }
 
 // --- 3. GEÇMİŞ KAYITLAR SAYFASI ---
-class GecmisKayitlarSayfasi extends StatelessWidget {
+class GecmisKayitlarSayfasi extends StatefulWidget {
   const GecmisKayitlarSayfasi({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    // Örnek sahte veriler
-    final List<Map<String, dynamic>> kayitlar = [
-      {"tarih": "Bugün 10:42", "olay": "Düşme Algılandı", "risk": "YÜKSEK", "renk": Colors.redAccent},
-      {"tarih": "Bugün 08:00", "olay": "Rutin Kontrol", "risk": "Güvenli", "renk": Colors.greenAccent},
-      {"tarih": "Dün 22:15", "olay": "Hareketsizlik Uyarısı", "risk": "Orta", "renk": Colors.orangeAccent},
-      {"tarih": "Dün 14:30", "olay": "Rutin Kontrol", "risk": "Güvenli", "renk": Colors.greenAccent},
-      {"tarih": "25.12.2025", "olay": "Sistem Başlatıldı", "risk": "Bilgi", "renk": Colors.blueAccent},
-    ];
+  State<GecmisKayitlarSayfasi> createState() => _GecmisKayitlarSayfasiState();
+}
 
+class _GecmisKayitlarSayfasiState extends State<GecmisKayitlarSayfasi> {
+  List<dynamic> kayitlar = [];
+  bool yukleniyor = true;
+
+  @override
+  void initState() {
+    super.initState();
+    gecmisiGetir();
+  }
+
+  Future<void> gecmisiGetir() async {
+    try {
+      final response = await http.get(Uri.parse('http://localhost:8000/history'));
+      if (response.statusCode == 200) {
+        setState(() {
+          kayitlar = jsonDecode(response.body);
+          yukleniyor = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Geçmiş getirme hatası: $e");
+      setState(() => yukleniyor = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Son Kayıtlar")),
-      body: ListView.builder(
+      appBar: AppBar(title: const Text("Walrus Kayıtları (History)")),
+      body: yukleniyor 
+        ? const Center(child: CircularProgressIndicator())
+        : ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: kayitlar.length,
         itemBuilder: (context, index) {
           final kayit = kayitlar[index];
+          final bool isEmergency = kayit['risk'] == "KRİTİK";
+          final Color renk = isEmergency ? Colors.redAccent : Colors.orangeAccent;
+
           return Container(
             margin: const EdgeInsets.only(bottom: 15),
             decoration: BoxDecoration(
               color: const Color(0xFF1E1E1E),
               borderRadius: BorderRadius.circular(15),
-              border: Border(left: BorderSide(color: kayit['renk'], width: 5)),
+              border: Border(left: BorderSide(color: renk, width: 5)),
             ),
             child: ListTile(
               contentPadding: const EdgeInsets.all(15),
               leading: Icon(
-                kayit['risk'] == "YÜKSEK" ? Icons.warning : Icons.check_circle,
-                color: kayit['renk'],
+                isEmergency ? Icons.warning : Icons.info_outline,
+                color: renk,
                 size: 40,
               ),
               title: Text(
                 kayit['olay'],
                 style: GoogleFonts.rubik(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
               ),
-              subtitle: Text(
-                "Zaman: ${kayit['tarih']}",
-                style: TextStyle(color: Colors.grey[400], fontSize: 14),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Zaman: ${kayit['tarih']}", style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+                  const SizedBox(height: 4),
+                  Text("Blob ID: ${kayit['blobId'].toString().substring(0, 10)}...", style: const TextStyle(fontSize: 10, color: Colors.blueGrey)),
+                ],
               ),
               trailing: Text(
                 kayit['risk'],
-                style: TextStyle(color: kayit['renk'], fontWeight: FontWeight.bold),
+                style: TextStyle(color: renk, fontWeight: FontWeight.bold),
               ),
             ),
           );
