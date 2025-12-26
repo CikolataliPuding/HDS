@@ -1,8 +1,8 @@
-import 'dart:async';
-import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
   runApp(const YasliDostuApp());
@@ -38,39 +38,48 @@ class AnaEkran extends StatefulWidget {
 }
 
 class _AnaEkranState extends State<AnaEkran> {
-  List<double> grafikVerisi = List.generate(50, (index) => 2.0);
+  List<double> grafikVerisi = List.generate(50, (index) => 0.0);
   bool tehlikeVar = false;
-  Timer? _timer;
+  String mevcutTahmin = "Bekleniyor...";
+  double mevcutConfidence = 0.0;
+  
+  late WebSocketChannel channel;
 
   @override
   void initState() {
     super.initState();
-    simulasyonuBaslat();
+    baglantiyiKur();
   }
 
-  void simulasyonuBaslat() {
-    _timer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      if (!mounted) return;
-      setState(() {
-        grafikVerisi.removeAt(0);
-        double yeniDeger = 2.0 + Random().nextDouble();
+  void baglantiyiKur() {
+    // Backend WebSocket adresi
+    channel = WebSocketChannel.connect(
+      Uri.parse('ws://localhost:8000/ws/monitor'),
+    );
 
-        // Demo amaçlı düşme simülasyonu
-        if (Random().nextInt(200) > 198) { // Biraz daha nadir olsun
-          yeniDeger = 8.0;
-          tehlikeVar = true;
-          Future.delayed(const Duration(seconds: 4), () {
-            if (mounted) setState(() => tehlikeVar = false);
-          });
-        }
-        grafikVerisi.add(yeniDeger);
+    channel.stream.listen((message) {
+      final data = jsonDecode(message);
+      if (!mounted) return;
+
+      setState(() {
+        double magnitude = (data['magnitude'] as num).toDouble();
+        mevcutTahmin = data['prediction'] as String;
+        mevcutConfidence = (data['confidence'] as num).toDouble();
+        tehlikeVar = data['is_emergency'] as bool;
+
+        // Grafiği güncelle
+        grafikVerisi.removeAt(0);
+        grafikVerisi.add(magnitude);
       });
+    }, onError: (error) {
+      debugPrint("WebSocket Hatası: $error");
+      // Yeniden bağlanma mantığı eklenebilir
     });
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    channel.sink.close();
     super.dispose();
   }
 
@@ -124,13 +133,13 @@ class _AnaEkranState extends State<AnaEkran> {
                       Icon(durumIkonu, size: 100, color: aktifRenk),
                       const SizedBox(height: 10),
                       Text(
-                        durumMetni,
+                        tehlikeVar ? "ACİL DURUM: $mevcutTahmin" : mevcutTahmin.toUpperCase(),
                         textAlign: TextAlign.center,
                         style: GoogleFonts.rubik(fontSize: 32, fontWeight: FontWeight.bold, color: aktifRenk),
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        tehlikeVar ? "Ekipler bilgilendiriliyor..." : "Sistem aktif.",
+                        tehlikeVar ? "Ekipler bilgilendiriliyor..." : "Güven Skoru: %${(mevcutConfidence * 100).toStringAsFixed(1)}",
                         style: TextStyle(color: Colors.grey[400], fontSize: 16),
                       ),
                     ],
