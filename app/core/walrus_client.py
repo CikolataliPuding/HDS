@@ -2,15 +2,23 @@ import httpx
 import json
 import logging
 from datetime import datetime
+import os
 
 logger = logging.getLogger("WalrusClient")
 
 class WalrusClient:
-    def __init__(self, publisher_url="https://publisher.walrus-testnet.walrus.space", aggregator_url="https://aggregator.walrus-testnet.walrus.space"):
+    def __init__(
+        self,
+        publisher_url: str | None = None,
+        aggregator_url: str | None = None,
+    ):
+        # Allow override via env vars for deployments / custom funded publisher
+        publisher_url = publisher_url or os.getenv("WALRUS_PUBLISHER_URL", "https://publisher.walrus-testnet.walrus.space")
+        aggregator_url = aggregator_url or os.getenv("WALRUS_AGGREGATOR_URL", "https://aggregator.walrus-testnet.walrus.space")
         self.publisher_url = publisher_url.rstrip("/")
         self.aggregator_url = aggregator_url.rstrip("/")
 
-    async def publish_blob(self, data: dict, data_type: str = "event"):
+    async def publish_blob(self, data: dict, data_type: str = "event", epochs: int = 10):
         """
         Publishes data to Walrus as a blob.
         data_type: 'event' or 'profile'
@@ -32,7 +40,7 @@ class WalrusClient:
                 response = await client.put(
                     url, 
                     content=json.dumps(payload),
-                    params={"epochs": 5}, # Store for longer (5 epochs)
+                    params={"epochs": epochs}, # store duration (epochs)
                     timeout=30.0
                 )
                 
